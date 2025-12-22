@@ -1,0 +1,22 @@
+# Raw MNIST dataset (will try to use 'python-mnist' soon)
+MNIST_ORG/
+# python-mnist/
+
+# MNIST CSV zip files
+mnist_test.csv.zip
+mnist_train.csv.zip
+
+# Read raw MNIST dataset from Kaggle
+kaggleloader.py
+kaggle.py
+
+# Samson Zhang
+zhang/
+
+# Python
+__pycache__/
+env/
+
+# Notes
+notes.txt
+.DS_Store
