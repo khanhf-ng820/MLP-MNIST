@@ -55,15 +55,14 @@ def derivativeSigmoid(z):
 	return sig * (1 - sig)
 
 def softmax(arr):
-	exp_arr = np.exp(arr)
-	# print(f"arr: {arr}")
-	# print(f"sumexp: {np.sum(exp_arr, axis=0)}")
-	exp_sum = np.tile(np.sum(exp_arr, axis=0), (np.size(exp_arr, 0), 1))
-	exp_arr /= exp_sum
-	return exp_arr
+	shift_arr = arr - np.max(arr, axis=0, keepdims=True)
+	exp_arr = np.exp(shift_arr)
+	exp_sum = np.sum(exp_arr, axis=0, keepdims=True)
+	return exp_arr / exp_sum
 
 def softmax1D(arr):
-	exp_arr = np.exp(arr)
+	shift_arr = arr - np.max(arr)
+	exp_arr = np.exp(shift_arr)
 	exp_sum = np.sum(exp_arr)
 	return exp_arr / exp_sum
 

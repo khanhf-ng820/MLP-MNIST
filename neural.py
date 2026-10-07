@@ -112,15 +112,14 @@ def derivativeSigmoid(z):
 	return sig * (1 - sig)
 
 def softmax(arr):
-	exp_arr = np.exp(arr)
-	# print(f"arr: {arr}")
-	# print(f"sumexp: {np.sum(exp_arr, axis=0)}")
-	exp_sum = np.tile(np.sum(exp_arr, axis=0), (np.size(exp_arr, 0), 1))
-	exp_arr /= exp_sum
-	return exp_arr
+	shift_arr = arr - np.max(arr, axis=0, keepdims=True)
+	exp_arr = np.exp(shift_arr)
+	exp_sum = np.sum(exp_arr, axis=0, keepdims=True)
+	return exp_arr / exp_sum
 
 def softmax1D(arr):
-	exp_arr = np.exp(arr)
+	shift_arr = arr - np.max(arr)
+	exp_arr = np.exp(shift_arr)
 	exp_sum = np.sum(exp_arr)
 	return exp_arr / exp_sum
 
@@ -174,6 +173,7 @@ class NeuralNetwork:
 
 		self.learningRate = learningRate
 		self.accuracies = []
+		self.losses = []
 
 	# ----- By 3B1B -----
 	def getPredictions(self):
@@ -184,6 +184,12 @@ class NeuralNetwork:
 		accuracy = np.sum(predictions == labels) / labels.size
 		self.accuracies.append(accuracy)
 		return accuracy
+
+	def getLoss(self, desiredOutput):
+		# Categorical cross-entropy loss over batch: -sum(y * log(a + eps)) / BATCH_SIZE
+		batchLoss = -np.sum(desiredOutput * np.log(self.neuronLayers[2] + 1e-15)) / BATCH_SIZE
+		self.losses.append(batchLoss)
+		return batchLoss
 
 	def forwardPropagation(self, exampleBatch):
 		exampleImages = exampleBatch.images
@@ -201,15 +207,17 @@ class NeuralNetwork:
 
 		# print(f"output: {self.neuronLayers[2]}")      # --- Print the output neurons
 		# print(np.sum(self.neuronLayers[2], axis=0))   # --- Make sure all neurons sum to 1
-		print(f"Acc. of batch: {self.getAccuracy(self.getPredictions(), exampleBatch.labels)}") # --- Print accuracy
+		batchAccuracy = self.getAccuracy(self.getPredictions(), exampleBatch.labels)
+		batchLoss = self.getLoss(exampleBatch.desiredOutputs())
+		print(f"Acc. of batch: {batchAccuracy:.4f}, Loss: {batchLoss:.4f}")   # --- Print accuracy and loss of the batch
 		return self.neuronLayers[2].copy()
 
 	# INSPIRED BY 3B1B
 	def calculateGradientBatch(self, exampleBatch):
 		gradientVector = gradientVectorClass(
 			[
-				np.zeros((1,1)), # First layer is useless
-				np.zeros((10, 28*28)),
+				np.zeros((1, 1)), # First layer is useless
+				np.zeros((10, 28 * 28)),
 				np.zeros((10, 10))
 			], # Weights
 			[
@@ -217,57 +225,29 @@ class NeuralNetwork:
 				np.zeros(10),
 				np.zeros(10)
 			] # Biases
-		) # Weights first, biases later
-		# Derivative of C_i (loss function) with respect to weights and biases, respectively
-		# Take average over all examples
+		)
 
-		derivativeActivation = [
-			np.zeros((28*28, BATCH_SIZE)),
-			np.zeros((10, BATCH_SIZE)),
-			np.zeros((10, BATCH_SIZE))
-		] # Derivative of C_i (loss function) with respect to activation values
-		# Take average over all examples
-
-		# Apply loss function (cost function)
 		desiredOutput = exampleBatch.desiredOutputs()
-		lossOfOutput = np.square(desiredOutput - self.neuronLayers[2])
 
-		# --- Backpropagate layer 2 (calculate derivative with respect to ACTIVATION VALUES)
-		derivativeActivation[2][:, :] = 2 * (self.neuronLayers[2] - desiredOutput)
+		# For Categorical Cross-Entropy with Softmax:
+		# dL / dz2 = a2 - y
+		delta2 = self.neuronLayers[2] - desiredOutput
 
-		# Loop over all examples
+		# Loop over all examples in batch
 		for i in range(BATCH_SIZE):
-			# --- Backpropagate layer 1 (calculate derivative with respect to ACTIVATION VALUES)
-			# k is before j
-			derivativeActivation[1][:, i] = np.matmul(
-				self.weights[2].transpose(),
-				derivativeSoftmax(self.zLinear[2][:, i]) * derivativeActivation[2][:, i]
-			)
+			delta2_i = delta2[:, i]
 
-			# --- Backpropagate layer 0 (calculate derivative with respect to ACTIVATION VALUES)
-			# k is before j
-			derivativeActivation[0][:, i] = np.matmul(
-				self.weights[1].transpose(),
-				self.dActFunc(self.zLinear[1][:, i]) * derivativeActivation[1][:, i]
-			)
+			# --- Backpropagate layer 1 (calculate derivative with respect to zLinear of layer 1)
+			# delta1 = (W2^T @ delta2) * dActFunc(z1)
+			delta1_i = np.matmul(self.weights[2].transpose(), delta2_i) * self.dActFunc(self.zLinear[1][:, i])
 
-			# --- Backpropagate layer 1-2 (calculate derivative with respect to WEIGHTS)
-			gradientVector.weights[2][:, :] += np.outer(
-				derivativeSoftmax(self.zLinear[2][:, i]) * derivativeActivation[2][:, i],
-				self.neuronLayers[1][:, i]
-			)
+			# --- Accumulate derivatives with respect to WEIGHTS
+			gradientVector.weights[2][:, :] += np.outer(delta2_i, self.neuronLayers[1][:, i])
+			gradientVector.weights[1][:, :] += np.outer(delta1_i, self.neuronLayers[0][:, i])
 
-			# --- Backpropagate layer 0-1 (calculate derivative with respect to WEIGHTS)
-			gradientVector.weights[1][:, :] += np.outer(
-				self.dActFunc(self.zLinear[1][:, i]) * derivativeActivation[1][:, i],
-				self.neuronLayers[0][:, i]
-			)
-
-			# --- Backpropagate layer 2 (calculate derivative with respect to BIASES)
-			gradientVector.biases[2][:] += derivativeSoftmax(self.zLinear[2][:, i]) * derivativeActivation[2][:, i]
-
-			# --- Backpropagate layer 1 (calculate derivative with respect to BIASES)
-			gradientVector.biases[1][:] += self.dActFunc(self.zLinear[1][:, i]) * derivativeActivation[1][:, i]
+			# --- Accumulate derivatives with respect to BIASES
+			gradientVector.biases[2][:] += delta2_i
+			gradientVector.biases[1][:] += delta1_i
 
 		gradientVector.takeAverage(BATCH_SIZE)
 
@@ -284,7 +264,10 @@ class NeuralNetwork:
 		self.bias[2] -= np.tile(negGradientVector.biases[2], (BATCH_SIZE, 1)).transpose() * self.learningRate
 
 	def overallAccuracy(self):
-		return sum(self.accuracies) / len(self.accuracies)
+		return sum(self.accuracies) / len(self.accuracies) if self.accuracies else 0.0
+
+	def overallLoss(self):
+		return sum(self.losses) / len(self.losses) if self.losses else 0.0
 
 
 	# ----- Pandas write weights and biases to CSV file -----

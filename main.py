@@ -61,6 +61,7 @@ def main():
 	print(f"Weights[2]: {NEURAL_NETWORK.weights[2]}")
 	print(f"Bias[1]: {NEURAL_NETWORK.bias[1]}")
 	print(f"Bias[2]: {NEURAL_NETWORK.bias[2]}")
+	print(f"Overall loss: {NEURAL_NETWORK.overallLoss()}")
 	print(f"Overall accuracy: {NEURAL_NETWORK.overallAccuracy()}")
 
 
