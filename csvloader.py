@@ -89,9 +89,18 @@ class MNIST_CSV_Loader:
 			self.testingLabels[startIndex:(startIndex + BATCH_SIZE)]
 		)
 
-	def resetStart(self):
+	def shuffleTrain(self):
+		# Shuffle training examples across columns
+		numExamples = self.trainingData.shape[1]
+		permutation = np.random.permutation(numExamples)
+		self.trainingData = self.trainingData[:, permutation]
+		self.trainingLabels = self.trainingLabels[permutation]
+
+	def resetStart(self, shuffle=True):
 		self.trainingExampleIndex = 0
 		self.testingExampleIndex = 0
+		if shuffle:
+			self.shuffleTrain()
 
 
 

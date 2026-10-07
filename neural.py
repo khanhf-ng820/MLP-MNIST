@@ -131,45 +131,53 @@ def derivativeSoftmax(z): # Derivative of softmax(z_j) wrt z_j
 
 
 
-# A 784 x 10 x 10 neural network for MNIST classification
+# A 784 x 128 x 10 neural network for MNIST classification
 class NeuralNetwork:
-	def __init__(self, actFunc, derivativeActFunc, wInit, learningRate):
+	def __init__(self, actFunc, derivativeActFunc, wInit, learningRate, hiddenSize=128):
 		self.actFunc = actFunc
 		self.dActFunc = derivativeActFunc
+		self.hiddenSize = hiddenSize
 
-		self.neuronLayers = [] # 3D array - layers - neuron index - example
-		self.neuronLayers.append(np.random.rand(28*28, BATCH_SIZE))
-		self.neuronLayers.append(np.random.rand(10, BATCH_SIZE))
-		self.neuronLayers.append(np.random.rand(10, BATCH_SIZE))
+		self.neuronLayers = [
+			np.zeros((28 * 28, BATCH_SIZE)),
+			np.zeros((self.hiddenSize, BATCH_SIZE)),
+			np.zeros((10, BATCH_SIZE))
+		]
 
-		self.weights = [] # 3D array - layers - right neuron index - left neuron index
+		# 3D array - layers - right neuron index - left neuron index
+		self.weights = [
+			np.zeros((1, 1)), # First layer is useless
+			np.zeros((self.hiddenSize, 28 * 28)),
+			np.zeros((10, self.hiddenSize))
+		]
+
 		weightInitScale = 1.0
-		self.weights.append(np.random.rand(1, 1) * weightInitScale) # First layer is useless
-		self.weights.append(np.random.rand(10, 28*28) * weightInitScale)
-		self.weights.append(np.random.rand(10, 10   ) * weightInitScale)
-
 		wInit = wInit.upper()
 		if wInit == "NAIVE":
 			# ----- Naive random initialization
-			self.weights[1] = np.random.rand(10, 28*28) * weightInitScale
-			self.weights[2] = np.random.rand(10, 10   ) * weightInitScale
+			self.weights[1] = np.random.rand(self.hiddenSize, 28 * 28) * weightInitScale
+			self.weights[2] = np.random.rand(10, self.hiddenSize) * weightInitScale
 		elif wInit == "XAVIER":
-			# ----- Xavier initialization (Normal dist)
-			self.weights[1] = xavierInit(10, 28*28)
-			self.weights[2] = xavierInit(10, 10   )
+			# ----- Xavier initialization (Uniform dist)
+			self.weights[1] = xavierInit(self.hiddenSize, 28 * 28)
+			self.weights[2] = xavierInit(10, self.hiddenSize)
 		elif wInit == "HE":
 			# ----- He initialization (Normal dist)
-			self.weights[1] = heInit(10, 28*28)
-			self.weights[2] = heInit(10, 10   )
+			self.weights[1] = heInit(self.hiddenSize, 28 * 28)
+			self.weights[2] = heInit(10, self.hiddenSize)
 
-		biasInitScale = 0.
-		# 3D array - layers - neuron index - example
-		# First layer is useless
-		self.bias = np.full((3, 10, BATCH_SIZE), biasInitScale)
+		biasInitScale = 0.0
+		self.bias = [
+			None,
+			np.full((self.hiddenSize, BATCH_SIZE), biasInitScale),
+			np.full((10, BATCH_SIZE), biasInitScale)
+		]
 
-		# 3D array - layers - neuron index - example
-		# First layer is useless
-		self.zLinear = np.zeros((3, 10, BATCH_SIZE)) # Linear combinations of each layer
+		self.zLinear = [
+			None,
+			np.zeros((self.hiddenSize, BATCH_SIZE)),
+			np.zeros((10, BATCH_SIZE))
+		]
 
 		self.learningRate = learningRate
 		self.accuracies = []
@@ -217,12 +225,12 @@ class NeuralNetwork:
 		gradientVector = gradientVectorClass(
 			[
 				np.zeros((1, 1)), # First layer is useless
-				np.zeros((10, 28 * 28)),
-				np.zeros((10, 10))
+				np.zeros((self.hiddenSize, 28 * 28)),
+				np.zeros((10, self.hiddenSize))
 			], # Weights
 			[
 				np.zeros(1), # First layer is useless
-				np.zeros(10),
+				np.zeros(self.hiddenSize),
 				np.zeros(10)
 			] # Biases
 		)
@@ -283,23 +291,36 @@ class NeuralNetwork:
 		print("Written weights successfully!")
 
 	def writeBiasToCSV(self, folderName):
-		biasDataFrame = pd.DataFrame(data=self.bias[1:, :, 0].transpose(),
-			index=list(range(10)),
-			columns=["layer1", "layer2"])
-		biasDataFrame.to_csv(f"{folderName}/bias/bias.csv", encoding="utf-8")
+		biasDataFrame1 = pd.DataFrame(data=self.bias[1][:, 0], columns=["layer1"])
+		biasDataFrame1.to_csv(f"{folderName}/bias/layer1.csv", encoding="utf-8")
+		biasDataFrame2 = pd.DataFrame(data=self.bias[2][:, 0], columns=["layer2"])
+		biasDataFrame2.to_csv(f"{folderName}/bias/layer2.csv", encoding="utf-8")
 		print("Written biases successfully!")
 
 
 	# ----- Pandas read weights and biases from CSV file -----
 	def readFromCSV(self, folderName):
+		import os
 		weights1 = np.array(pd.read_csv(f"{folderName}/weights/layer1.csv"))
 		weights2 = np.array(pd.read_csv(f"{folderName}/weights/layer2.csv"))
-		bias = np.array(pd.read_csv(f"{folderName}/bias/bias.csv"))
 
 		self.weights[1] = weights1[:, 1:]
 		self.weights[2] = weights2[:, 1:]
-		self.bias[1] = np.tile(bias[:, 1], (BATCH_SIZE, 1)).transpose()
-		self.bias[2] = np.tile(bias[:, 2], (BATCH_SIZE, 1)).transpose()
+
+		# Adapt hidden size to match the loaded weights
+		self.hiddenSize = self.weights[1].shape[0]
+		self.neuronLayers[1] = np.zeros((self.hiddenSize, BATCH_SIZE))
+		self.zLinear[1] = np.zeros((self.hiddenSize, BATCH_SIZE))
+
+		if os.path.exists(f"{folderName}/bias/layer1.csv") and os.path.exists(f"{folderName}/bias/layer2.csv"):
+			bias1 = np.array(pd.read_csv(f"{folderName}/bias/layer1.csv"))[:, 1]
+			bias2 = np.array(pd.read_csv(f"{folderName}/bias/layer2.csv"))[:, 1]
+			self.bias[1] = np.tile(bias1, (BATCH_SIZE, 1)).transpose()
+			self.bias[2] = np.tile(bias2, (BATCH_SIZE, 1)).transpose()
+		elif os.path.exists(f"{folderName}/bias/bias.csv"):
+			bias = np.array(pd.read_csv(f"{folderName}/bias/bias.csv"))
+			self.bias[1] = np.tile(bias[:, 1], (BATCH_SIZE, 1)).transpose()
+			self.bias[2] = np.tile(bias[:, 2], (BATCH_SIZE, 1)).transpose()
 
 
 	# ----- Forward propagation (not for training or testing) -----
